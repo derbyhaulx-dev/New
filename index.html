@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Reveal</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0a0a0a;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        #container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #clean-image {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+        }
+
+        /* Скрытый источник для блюра */
+        #censored-source {
+            display: none;
+        }
+
+        #scratch-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 3;
+            touch-action: none;
+            cursor: crosshair;
+        }
+
+        #particles-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 4;
+            pointer-events: none;
+        }
+
+        /* Hint overlay */
+        #hint {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 5;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.4);
+            opacity: 1;
+            transition: opacity 0.5s ease;
+            pointer-events: none;
+        }
+
+        #hint.hidden {
+            opacity: 0;
+        }
+
+        .hint-icon {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+            animation: swipe 1.5s ease-in-out infinite;
+        }
+
+        @keyframes swipe {
+            0%, 100% { transform: translateX(-20px) rotate(-10deg); opacity: 0.5; }
+            50% { transform: translateX(20px) rotate(10deg); opacity: 1; }
+        }
+
+        .hint-text {
+            color: white;
+            font-size: 18px;
+            font-weight: 600;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.8);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.7; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.05); }
+        }
+
+        /* Progress bar */
+        #progress-container {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80%;
+            max-width: 300px;
+            z-index: 10;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        #progress-container.visible {
+            opacity: 1;
+        }
+
+        #progress-bar {
+            width: 100%;
+            height: 6px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 3px;
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+        }
+
+        #progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #ff006e, #ff4d6d, #ff758f);
+            border-radius: 3px;
+            transition: width 0.1s ease;
+            box-shadow: 0 0 20px rgba(255, 0, 110, 0.6);
+        }
+
+        #progress-text {
+            text-align: center;
+            color: white;
+            font-size: 12px;
+            margin-top: 8px;
+            font-weight: 500;
+            text-shadow: 0 1px 5px rgba(0,0,0,0.5);
+        }
+
+        /* Popup */
+        #popup-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 99;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.4s ease, visibility 0.4s;
+            backdrop-filter: blur(5px);
+        }
+
+        #popup-overlay.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        #popup {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.8);
+            width: 85%;
+            max-width: 340px;
+            background: linear-gradient(145deg, #1a1a2e, #16213e);
+            border: 1px solid rgba(255, 0, 110, 0.3);
+            border-radius: 24px;
+            padding: 30px 25px;
+            text-align: center;
+            color: white;
+            z-index: 100;
+            box-shadow: 
+                0 25px 50px rgba(0, 0, 0, 0.5),
+                0 0 100px rgba(255, 0, 110, 0.2),
+                inset 0 1px 0 rgba(255,255,255,0.1);
+            opacity: 0;
+            transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.4s ease;
+        }
+
+        #popup-overlay.visible #popup {
+            transform: translate(-50%, -50%) scale(1);
+            opacity: 1;
+        }
+
+        .popup-emoji {
+            font-size: 50px;
+            margin-bottom: 15px;
+            animation: bounce 0.6s ease;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+        }
+
+        .popup-title {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #fff, #ff006e);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .popup-text {
+            font-size: 15px;
+            opacity: 0.8;
+            line-height: 1.5;
+            margin-bottom: 25px;
+        }
+
+        .popup-btn {
+            width: 100%;
+            padding: 16px 0;
+            border: none;
+            border-radius: 14px;
+            font-size: 17px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            background: linear-gradient(135deg, #ff006e, #ff4d6d);
+            color: white;
+            box-shadow: 
+                0 10px 30px rgba(255, 0, 110, 0.4),
+                inset 0 1px 0 rgba(255,255,255,0.2);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .popup-btn:active {
+            transform: scale(0.97);
+            box-shadow: 0 5px 20px rgba(255, 0, 110, 0.3);
+        }
+
+        .popup-close {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            width: 30px;
+            height: 30px;
+            border: none;
+            background: rgba(255,255,255,0.1);
+            border-radius: 50%;
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .popup-close:active {
+            background: rgba(255,255,255,0.2);
+        }
+
+        /* Loading */
+        #loading {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #0a0a0a;
+            z-index: 200;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.5s ease;
+        }
+
+        #loading.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .loader {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255, 0, 110, 0.2);
+            border-top-color: #ff006e;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+<div id="container">
+    <img id="clean-image" src="girl_clean.jpg" alt="">
+    <img id="censored-source" src="girl_censored.jpg" alt="">
+    
+    <canvas id="scratch-canvas"></canvas>
+    <canvas id="particles-canvas"></canvas>
+    
+    <div id="hint">
+        <svg class="hint-icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 7c-2.5 0-4.5 1.5-4.5 3.5C7.5 12 12 13.5 12 13.5s4.5-1.5 4.5-3C16.5 8.5 14.5 7 12 7z"/>
+            <path d="M12 13.5c-2.5 0-4.5 1.5-4.5 3C7.5 18 12 18 12 18s4.5 0 4.5-1.5c0-1.5-2-3-4.5-3"/>
+            <path d="M7.5 10.5c0 0-1.5 1-1.5 3 0 2.5 3 3.5 6 3.5s6-1 6-3.5c0-2-1.5-3-1.5-3"/>
+        </svg>
+        <span class="hint-text">Swipe to reveal ✨</span>
+    </div>
+
+    <div id="progress-container">
+        <div id="progress-bar">
+            <div id="progress-fill"></div>
+        </div>
+        <div id="progress-text">Keep going... 🔥</div>
+    </div>
+
+    <div id="popup-overlay">
+        <div id="popup">
+            <button class="popup-close" onclick="closePopup()">✕</button>
+            <div class="popup-emoji">🔞</div>
+            <h2 class="popup-title">Wait, not so fast!</h2>
+            <p class="popup-text">Want to see the full uncensored version? Join VIP for exclusive content 💋</p>
+            <button class="popup-btn" onclick="openVIP()">Join VIP Access</button>
+        </div>
+    </div>
+
+    <div id="loading">
+        <div class="loader"></div>
+    </div>
+</div>
+
+<script>
+const tg = window.Telegram?.WebApp;
+if (tg) {
+    tg.expand();
+    tg.ready();
+}
+
+const VIP_LINK = "https://t.me/+vip_channel_link";
+
+// Elements
+const container = document.getElementById('container');
+const cleanImg = document.getElementById('clean-image');
+const censoredImg = document.getElementById('censored-source');
+const scratchCanvas = document.getElementById('scratch-canvas');
+const particlesCanvas = document.getElementById('particles-canvas');
+const hint = document.getElementById('hint');
+const progressContainer = document.getElementById('progress-container');
+const progressFill = document.getElementById('progress-fill');
+const progressText = document.getElementById('progress-text');
+const popupOverlay = document.getElementById('popup-overlay');
+const loading = document.getElementById('loading');
+
+const scratchCtx = scratchCanvas.getContext('2d', { willReadFrequently: true });
+const particlesCtx = particlesCanvas.getContext('2d');
+
+let isDrawing = false;
+let gameEnded = false;
+let hasStarted = false;
+let lastX = 0, lastY = 0;
+let particles = [];
+let brushSize = 45;
+let currentProgress = 0;
+
+// Particles class
+class Particle {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.size = Math.random() * 4 + 2;
+        this.speedX = (Math.random() - 0.5) * 8;
+        this.speedY = (Math.random() - 0.5) * 8;
+        this.life = 1;
+        this.decay = Math.random() * 0.03 + 0.02;
+        this.color = `hsl(${330 + Math.random() * 30}, 100%, ${60 + Math.random() * 20}%)`;
+    }
+
+    update() {
+        this.x += this.speedX;
+        this.y += this.speedY;
+        this.speedY += 0.1;
+        this.life -= this.decay;
+        this.size *= 0.98;
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.globalAlpha = this.life;
+        ctx.fillStyle = this.color;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+// Initialize
+function init() {
+    // Гарантируем, что лоадер исчезнет
+    loading.classList.add('hidden');
+    
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    
+    // Events
+    scratchCanvas.addEventListener('mousedown', startDraw);
+    scratchCanvas.addEventListener('mousemove', draw);
+    window.addEventListener('mouseup', endDraw);
+    
+    scratchCanvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+    scratchCanvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', endDraw);
+    
+    // Animation loop
+    animateParticles();
+}
+
+function resizeCanvas() {
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    
+    scratchCanvas.width = w;
+    scratchCanvas.height = h;
+    particlesCanvas.width = w;
+    particlesCanvas.height = h;
+    
+    initScratchLayer();
+}
+
+function initScratchLayer() {
+    const w = scratchCanvas.width;
+    const h = scratchCanvas.height;
+    const imgW = censoredImg.naturalWidth;
+    const imgH = censoredImg.naturalHeight;
+    
+    // ПРОВЕРКА: Если картинка загружена (ширина > 0), рисуем её
+    if (imgW && imgH) {
+        // Очищаем канвас
+        scratchCtx.clearRect(0, 0, scratchCanvas.width, scratchCanvas.height);
+        
+        const scale = Math.max(w / imgW, h / imgH);
+        const x = (w / 2) - (imgW / 2) * scale;
+        const y = (h / 2) - (imgH / 2) * scale;
+
+        scratchCtx.globalCompositeOperation = 'source-over';
+        scratchCtx.drawImage(censoredImg, x, y, imgW * scale, imgH * scale);
+        
+        // Добавляем легкую виньетку
+        const gradient = scratchCtx.createRadialGradient(
+            w / 2, h / 2, 0,
+            w / 2, h / 2, w
+        );
+        gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+        
+        scratchCtx.globalCompositeOperation = 'source-over';
+        scratchCtx.fillStyle = gradient;
+        scratchCtx.fillRect(0, 0, w, h);
+    } else {
+        // Если картинка ЕЩЕ не загрузилась, пробуем снова
+        setTimeout(initScratchLayer, 100);
+    }
+}
+
+// Touch handlers
+function handleTouchStart(e) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const pos = getPos(touch);
+    lastX = pos.x;
+    lastY = pos.y;
+    startDraw(e);
+}
+
+function handleTouchMove(e) {
+    e.preventDefault();
+    for (let i = 0; i < e.touches.length; i++) {
+        const touch = e.touches[i];
+        drawAt(touch);
+    }
+}
+
+function getPos(e) {
+    const rect = scratchCanvas.getBoundingClientRect();
+    const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+    const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+    return {
+        x: clientX - rect.left,
+        y: clientY - rect.top
+    };
+}
+
+function startDraw(e) {
+    if (gameEnded) return;
+    isDrawing = true;
+    
+    if (!hasStarted) {
+        hasStarted = true;
+        hint.classList.add('hidden');
+        progressContainer.classList.add('visible');
+    }
+    
+    const pos = getPos(e.touches ? e.touches[0] : e);
+    lastX = pos.x;
+    lastY = pos.y;
+    
+    if (tg?.HapticFeedback) {
+        tg.HapticFeedback.impactOccurred('light');
+    }
+}
+
+function endDraw() {
+    if (!isDrawing) return;
+    isDrawing = false;
+    checkProgress();
+}
+
+function draw(e) {
+    if (!isDrawing || gameEnded) return;
+    drawAt(e);
+}
+
+function drawAt(e) {
+    if (gameEnded) return;
+    const pos = getPos(e);
+    
+    scratchCtx.globalCompositeOperation = 'destination-out';
+    scratchCtx.lineCap = 'round';
+    scratchCtx.lineJoin = 'round';
+    scratchCtx.lineWidth = brushSize;
+    
+    scratchCtx.beginPath();
+    scratchCtx.moveTo(lastX, lastY);
+    scratchCtx.lineTo(pos.x, pos.y);
+    scratchCtx.stroke();
+    
+    // Particles
+    const dist = Math.hypot(pos.x - lastX, pos.y - lastY);
+    const particleCount = Math.min(Math.floor(dist / 5), 5);
+    for (let i = 0; i < particleCount; i++) {
+        const t = i / particleCount;
+        const px = lastX + (pos.x - lastX) * t;
+        const py = lastY + (pos.y - lastY) * t;
+        particles.push(new Particle(px, py));
+    }
+    if (particles.length > 100) particles = particles.slice(-100);
+    
+    if (tg?.HapticFeedback && Math.random() > 0.9) {
+        tg.HapticFeedback.impactOccurred('light');
+    }
+    
+    lastX = pos.x;
+    lastY = pos.y;
+    updateProgress();
+}
+
+function animateParticles() {
+    particlesCtx.clearRect(0, 0, particlesCanvas.width, particlesCanvas.height);
+    particles = particles.filter(p => p.life > 0);
+    particles.forEach(p => { p.update(); p.draw(particlesCtx); });
+    requestAnimationFrame(animateParticles);
+}
+
+function updateProgress() {
+    const imageData = scratchCtx.getImageData(0, 0, scratchCanvas.width, scratchCanvas.height);
+    const data = imageData.data;
+    let transparent = 0;
+    let total = 0;
+    for (let i = 3; i < data.length; i += 400) {
+        total++;
+        if (data[i] < 128) transparent++;
+    }
+    
+    currentProgress = Math.min((transparent / total) * 100, 100);
+    progressFill.style.width = currentProgress + '%';
+    
+    if (currentProgress < 15) progressText.textContent = "Keep going... 🔥";
+    else if (currentProgress < 30) progressText.textContent = "Almost there! 😏";
+    else if (currentProgress < 40) progressText.textContent = "So close... 💋";
+}
+
+function checkProgress() {
+    if (gameEnded) return;
+    if (currentProgress >= 35) endGame();
+}
+
+function endGame() {
+    gameEnded = true;
+    if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    
+    scratchCanvas.style.transition = 'opacity 0.5s ease';
+    scratchCanvas.style.opacity = '0';
+    
+    setTimeout(() => {
+        popupOverlay.classList.add('visible');
+        if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+    }, 800);
+}
+
+function openVIP() {
+    if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+    if (tg) tg.openLink(VIP_LINK);
+    else window.open(VIP_LINK, '_blank');
+}
+
+function closePopup() {
+    popupOverlay.classList.remove('visible');
+    if (tg) tg.close();
+    else location.reload();
+}
+
+// --- ЗАГРУЗКА ---
+let imagesLoaded = 0;
+const totalImages = 2; 
+
+function checkImages() {
+    imagesLoaded++;
+    if (imagesLoaded >= totalImages) {
+        init();
+    }
+}
+
+// Запускаем загрузку
+if (cleanImg.complete && cleanImg.naturalHeight !== 0) {
+    checkImages();
+} else {
+    cleanImg.onload = checkImages;
+    cleanImg.onerror = checkImages; 
+}
+
+if (censoredImg.complete && censoredImg.naturalHeight !== 0) {
+    checkImages();
+} else {
+    censoredImg.onload = checkImages;
+    censoredImg.onerror = checkImages;
+}
+
+// Safety Fallback: если через 5 секунд картинки не отдались, форсируем запуск
+setTimeout(() => {
+    if (!loading.classList.contains('hidden')) {
+        console.log("Forcing init due to timeout");
+        loading.classList.add('hidden');
+        init();
+    }
+}, 5000);
+
+</script>
+</body>
+</html>
