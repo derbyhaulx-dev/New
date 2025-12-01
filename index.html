@@ -43,7 +43,10 @@
             z-index: 1;
         }
 
-        /* blur-layer удален, теперь мы рисуем блюр прямо на scratch-canvas */
+        /* Скрытый источник для блюра */
+        #censored-source {
+            display: none;
+        }
 
         #scratch-canvas {
             position: absolute;
@@ -311,15 +314,16 @@
 
 <div id="container">
     <img id="clean-image" src="girl_clean.jpg" alt="">
-    <img id="censored-source" src="girl_censored.jpg" alt="" style="display: none;">
+    <img id="censored-source" src="girl_censored.jpg" alt="">
     
     <canvas id="scratch-canvas"></canvas>
     <canvas id="particles-canvas"></canvas>
     
     <div id="hint">
-        <svg class="hint-icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5">
-            <path d="M12 18V22M8 22H16M7.5 2.5L9 4M16.5 2.5L15 4M12 2V4"/>
-            <path d="M5.5 9C5.5 5.5 8 3.5 12 3.5C16 3.5 18.5 5.5 18.5 9C18.5 11.5 17 13 15.5 14L14.5 15C14 15.5 14 16 14 17H10C10 16 10 15.5 9.5 15L8.5 14C7 13 5.5 11.5 5.5 9Z"/>
+        <svg class="hint-icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 7c-2.5 0-4.5 1.5-4.5 3.5C7.5 12 12 13.5 12 13.5s4.5-1.5 4.5-3C16.5 8.5 14.5 7 12 7z"/>
+            <path d="M12 13.5c-2.5 0-4.5 1.5-4.5 3C7.5 18 12 18 12 18s4.5 0 4.5-1.5c0-1.5-2-3-4.5-3"/>
+            <path d="M7.5 10.5c0 0-1.5 1-1.5 3 0 2.5 3 3.5 6 3.5s6-1 6-3.5c0-2-1.5-3-1.5-3"/>
         </svg>
         <span class="hint-text">Swipe to reveal ✨</span>
     </div>
@@ -415,6 +419,9 @@ class Particle {
 
 // Initialize
 function init() {
+    // Гарантируем, что лоадер исчезнет
+    loading.classList.add('hidden');
+    
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
     
@@ -444,39 +451,38 @@ function resizeCanvas() {
 }
 
 function initScratchLayer() {
-    // Очищаем канвас
-    scratchCtx.clearRect(0, 0, scratchCanvas.width, scratchCanvas.height);
-    
-    // Рисуем заблюренное фото с имитацией object-fit: cover
     const w = scratchCanvas.width;
     const h = scratchCanvas.height;
     const imgW = censoredImg.naturalWidth;
     const imgH = censoredImg.naturalHeight;
     
+    // ПРОВЕРКА: Если картинка загружена (ширина > 0), рисуем её
     if (imgW && imgH) {
+        // Очищаем канвас
+        scratchCtx.clearRect(0, 0, scratchCanvas.width, scratchCanvas.height);
+        
         const scale = Math.max(w / imgW, h / imgH);
         const x = (w / 2) - (imgW / 2) * scale;
         const y = (h / 2) - (imgH / 2) * scale;
 
         scratchCtx.globalCompositeOperation = 'source-over';
         scratchCtx.drawImage(censoredImg, x, y, imgW * scale, imgH * scale);
-    } else {
-        // Фоллбек, если картинка вдруг не прогрузилась
-        scratchCtx.fillStyle = '#111';
+        
+        // Добавляем легкую виньетку
+        const gradient = scratchCtx.createRadialGradient(
+            w / 2, h / 2, 0,
+            w / 2, h / 2, w
+        );
+        gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+        
+        scratchCtx.globalCompositeOperation = 'source-over';
+        scratchCtx.fillStyle = gradient;
         scratchCtx.fillRect(0, 0, w, h);
+    } else {
+        // Если картинка ЕЩЕ не загрузилась, пробуем снова
+        setTimeout(initScratchLayer, 100);
     }
-
-    // Добавляем легкую виньетку для лучшей читаемости текста
-    const gradient = scratchCtx.createRadialGradient(
-        w / 2, h / 2, 0,
-        w / 2, h / 2, w
-    );
-    gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    gradient.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
-    
-    scratchCtx.globalCompositeOperation = 'source-over';
-    scratchCtx.fillStyle = gradient;
-    scratchCtx.fillRect(0, 0, w, h);
 }
 
 // Touch handlers
@@ -491,8 +497,6 @@ function handleTouchStart(e) {
 
 function handleTouchMove(e) {
     e.preventDefault();
-    
-    // Support multi-touch
     for (let i = 0; i < e.touches.length; i++) {
         const touch = e.touches[i];
         drawAt(touch);
@@ -523,7 +527,6 @@ function startDraw(e) {
     lastX = pos.x;
     lastY = pos.y;
     
-    // Haptic
     if (tg?.HapticFeedback) {
         tg.HapticFeedback.impactOccurred('light');
     }
@@ -542,10 +545,8 @@ function draw(e) {
 
 function drawAt(e) {
     if (gameEnded) return;
-    
     const pos = getPos(e);
     
-    // Draw scratch line (стираем блюр слой)
     scratchCtx.globalCompositeOperation = 'destination-out';
     scratchCtx.lineCap = 'round';
     scratchCtx.lineJoin = 'round';
@@ -556,44 +557,30 @@ function drawAt(e) {
     scratchCtx.lineTo(pos.x, pos.y);
     scratchCtx.stroke();
     
-    // Create particles
+    // Particles
     const dist = Math.hypot(pos.x - lastX, pos.y - lastY);
     const particleCount = Math.min(Math.floor(dist / 5), 5);
-    
     for (let i = 0; i < particleCount; i++) {
         const t = i / particleCount;
         const px = lastX + (pos.x - lastX) * t;
         const py = lastY + (pos.y - lastY) * t;
         particles.push(new Particle(px, py));
     }
+    if (particles.length > 100) particles = particles.slice(-100);
     
-    // Limit particles
-    if (particles.length > 100) {
-        particles = particles.slice(-100);
-    }
-    
-    // Light haptic on move
     if (tg?.HapticFeedback && Math.random() > 0.9) {
         tg.HapticFeedback.impactOccurred('light');
     }
     
     lastX = pos.x;
     lastY = pos.y;
-    
-    // Update progress in real-time
     updateProgress();
 }
 
 function animateParticles() {
     particlesCtx.clearRect(0, 0, particlesCanvas.width, particlesCanvas.height);
-    
     particles = particles.filter(p => p.life > 0);
-    
-    particles.forEach(p => {
-        p.update();
-        p.draw(particlesCtx);
-    });
-    
+    particles.forEach(p => { p.update(); p.draw(particlesCtx); });
     requestAnimationFrame(animateParticles);
 }
 
@@ -602,8 +589,6 @@ function updateProgress() {
     const data = imageData.data;
     let transparent = 0;
     let total = 0;
-    
-    // Sample every 100th pixel for performance
     for (let i = 3; i < data.length; i += 400) {
         total++;
         if (data[i] < 128) transparent++;
@@ -612,96 +597,76 @@ function updateProgress() {
     currentProgress = Math.min((transparent / total) * 100, 100);
     progressFill.style.width = currentProgress + '%';
     
-    // Update text based on progress
-    if (currentProgress < 15) {
-        progressText.textContent = "Keep going... 🔥";
-    } else if (currentProgress < 30) {
-        progressText.textContent = "Almost there! 😏";
-    } else if (currentProgress < 40) {
-        progressText.textContent = "So close... 💋";
-    }
+    if (currentProgress < 15) progressText.textContent = "Keep going... 🔥";
+    else if (currentProgress < 30) progressText.textContent = "Almost there! 😏";
+    else if (currentProgress < 40) progressText.textContent = "So close... 💋";
 }
 
 function checkProgress() {
     if (gameEnded) return;
-    
-    if (currentProgress >= 35) {
-        endGame();
-    }
+    if (currentProgress >= 35) endGame();
 }
 
 function endGame() {
     gameEnded = true;
+    if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
     
-    // Strong haptic
-    if (tg?.HapticFeedback) {
-        tg.HapticFeedback.notificationOccurred('success');
-    }
-    
-    // Fade out scratch canvas fully
     scratchCanvas.style.transition = 'opacity 0.5s ease';
     scratchCanvas.style.opacity = '0';
     
-    // Show popup after delay
     setTimeout(() => {
         popupOverlay.classList.add('visible');
-        if (tg?.HapticFeedback) {
-            tg.HapticFeedback.impactOccurred('medium');
-        }
+        if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
     }, 800);
 }
 
 function openVIP() {
-    if (tg?.HapticFeedback) {
-        tg.HapticFeedback.impactOccurred('medium');
-    }
-    
-    if (tg) {
-        tg.openLink(VIP_LINK);
-    } else {
-        window.open(VIP_LINK, '_blank');
-    }
+    if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+    if (tg) tg.openLink(VIP_LINK);
+    else window.open(VIP_LINK, '_blank');
 }
 
 function closePopup() {
     popupOverlay.classList.remove('visible');
-    
-    // Закрываем WebApp при нажатии на крестик
-    if (tg) {
-        tg.close();
-    } else {
-        // Фоллбек для теста в браузере
-        console.log("WebApp closed");
-        location.reload();
-    }
+    if (tg) tg.close();
+    else location.reload();
 }
 
-// Image loading
+// --- ЗАГРУЗКА ---
 let imagesLoaded = 0;
-const totalImages = 2; // Ждем и чистое, и заблюренное фото
+const totalImages = 2; 
 
-function onImageLoad() {
+function checkImages() {
     imagesLoaded++;
     if (imagesLoaded >= totalImages) {
-        loading.classList.add('hidden');
         init();
     }
 }
 
-cleanImg.onload = onImageLoad;
-censoredImg.onload = onImageLoad;
+// Запускаем загрузку
+if (cleanImg.complete && cleanImg.naturalHeight !== 0) {
+    checkImages();
+} else {
+    cleanImg.onload = checkImages;
+    cleanImg.onerror = checkImages; 
+}
 
-// If cached
-if (cleanImg.complete) onImageLoad();
-if (censoredImg.complete) onImageLoad();
+if (censoredImg.complete && censoredImg.naturalHeight !== 0) {
+    checkImages();
+} else {
+    censoredImg.onload = checkImages;
+    censoredImg.onerror = checkImages;
+}
 
-// Fallback timeout
+// Safety Fallback: если через 5 секунд картинки не отдались, форсируем запуск
 setTimeout(() => {
     if (!loading.classList.contains('hidden')) {
+        console.log("Forcing init due to timeout");
         loading.classList.add('hidden');
         init();
     }
-}, 3000);
+}, 5000);
+
 </script>
 </body>
 </html>
